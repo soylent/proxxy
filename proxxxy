@@ -1,0 +1,173 @@
+#!/usr/bin/env -S ruby -w
+# frozen_string_literal: true
+
+require 'csv'
+require 'eventmachine'
+require 'optparse'
+require 'pathname'
+require 'socket'
+require 'time'
+
+op = OptionParser.new do |opts|
+  opts.banner =
+    "Usage: proxxxy [options]\n" \
+    'https proxy'
+
+  opts.summary_width = 20
+
+  opts.separator ''
+  opts.separator 'Options'
+  opts.on('-h', '--host HOST', String, 'Bind to host (default: 0.0.0.0)')
+  opts.on('-p', '--port PORT', OptionParser::DecimalInteger, 'Use port (default: 3128)') do |port|
+    raise OptionParser::InvalidArgument, port unless (0..65535).cover?(port)
+    port
+  end
+  opts.on('-s', '--socket FILE', String, 'Bind to unix domain socket')
+  opts.on('-q', '--quiet', 'Disable logging')
+  opts.on('-v', '--version', 'Show version and exit') do
+    version = Pathname(__dir__).join('VERSION').read
+    puts(version)
+    exit
+  end
+  opts.on_tail('--help', 'Print this help') do
+    puts opts
+    exit
+  end
+end
+
+begin
+  op.parse!(into: opts = {})
+rescue OptionParser::ParseError => e
+  op.abort(e)
+else
+  if opts[:socket]
+    if opts[:host] || opts[:port]
+      op.abort('host/port and socket are mutually exclusive')
+    end
+  else
+    opts[:host] ||= '0.0.0.0'
+    opts[:port] ||= 3128
+  end
+end
+
+class Client < EventMachine::Connection
+  attr_accessor :quiet
+
+  def post_init
+    @client_addr = client_addr
+    @buf = nil
+    @host = nil
+    @port = nil
+    @server = nil
+  end
+
+  def receive_data(data)
+    return if @server
+
+    @buf ? @buf << data : @buf = data
+    return unless @buf.match?(/\r?\n\r?\n/)
+
+    match = @buf.match(
+      /\ACONNECT ([^:]+):([1-9][0-9]*) (HTTP\/[0-1]\.\d+).*\r?\n\r?\n/m
+    )
+    unless match
+      log('failure', "request: #{@buf[0, 32].inspect[1...-1]}")
+      close_connection
+      return
+    end
+    @buf = nil
+    @host, @port, @httpv = match.captures
+    begin
+      @server = EventMachine.connect(@host, @port, Server, self)
+    rescue EventMachine::ConnectionError => e
+      log('failure', e)
+      close_connection
+    rescue RangeError
+      log('failure', 'invalid port')
+      close_connection
+    else
+      proxy_incoming_to(@server)
+      @server.proxy_incoming_to(self)
+      @server.send_data(match.post_match)
+    end
+  end
+
+  def send_ok
+    send_data("#{@httpv} 200 Connection established\r\n\r\n")
+  end
+
+  def unbind
+    return unless @server
+
+    if @server.error
+      log('failure', 'server connection error')
+    else
+      log('success', get_proxied_bytes)
+    end
+
+    @server.close_connection_after_writing
+    @server = nil
+  end
+
+  private
+
+  def client_addr
+    addrinfo = Addrinfo.new(get_peername)
+  rescue RuntimeError
+    nil
+  else
+    addrinfo.unix? ? '-' : addrinfo.inspect_sockaddr
+  end
+
+  def log(status, comment)
+    return if quiet
+
+    time = Time.now.iso8601(3)
+    server = @host && @port ? "#{@host}:#{@port}" : '-'
+
+    row = [time, @client_addr, server, status, comment.to_s]
+    puts CSV.generate_line(row, col_sep: ' ')
+  end
+end
+
+class Server < EventMachine::Connection
+  attr_reader :error
+
+  def initialize(client)
+    super
+
+    @client = client
+    @connected = false
+    @error = false
+  end
+
+  def connection_completed
+    @connected = true
+    @client.send_ok
+  end
+
+  def unbind
+    @error = true unless @connected
+
+    @client.close_connection_after_writing
+  end
+end
+
+EventMachine.epoll
+EventMachine.run do
+  trap('INT') { EventMachine.stop }
+
+  host = opts[:host] || opts[:socket]
+  port = opts[:port]
+
+  begin
+    EventMachine.start_server(host, port, Client) do |client|
+      client.quiet = opts[:quiet]
+    end
+  rescue RuntimeError => e
+    EventMachine.stop
+    op.abort(e)
+  end
+end
+
+# vim: ft=ruby
