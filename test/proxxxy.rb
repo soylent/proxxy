@@ -52,19 +52,18 @@ begin
       assert_equal "HTTP/1.1 200 Connection established\r\n", socket.gets
       assert_equal "\r\n", socket.gets
 
-      socket.puts('proxxxy')
-
-      assert_equal "proxxxy\n", socket.gets
+      socket.write("proxxxy\r\n")
+      assert_equal "proxxxy\r\n", socket.gets
     end
   end
 
   test 'that it supports data pipelining' do
     assert_proxxxy(stdout: /success/) do |socket|
-      socket.write("CONNECT 127.0.0.1:3000 HTTP/1.1\r\n\r\nproxxxy\n")
+      socket.write("CONNECT 127.0.0.1:3000 HTTP/1.1\r\n\r\nproxxxy\r\n")
 
       assert_equal "HTTP/1.1 200 Connection established\r\n", socket.gets
       assert_equal "\r\n", socket.gets
-      assert_equal "proxxxy\n", socket.gets
+      assert_equal "proxxxy\r\n", socket.gets
     end
   end
 
@@ -125,6 +124,19 @@ begin
       assert_proxxxy(stdout: /success 0/) do |socket|
         socket.write("CONNECT 127.0.0.1:3001 HTTP/1.1\r\n\r\n")
         sleep(0.05)
+      end
+    end
+  end
+
+  test 'that it can be chained' do
+    assert_proxxxy(stdout: /success/) do |socket|
+      assert_proxxxy('--port', '3128', stdout: /success/) do
+        socket.write("CONNECT 127.0.0.1:3128 HTTP/1.1\r\n\r\n")
+        socket.readpartial(64)
+        socket.write("CONNECT 127.0.0.1:3000 HTTP/1.1\r\n\r\n")
+        socket.readpartial(64)
+        socket.write("proxxxy\r\n")
+        assert_equal "proxxxy\r\n", socket.gets
       end
     end
   end
