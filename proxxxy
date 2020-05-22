@@ -7,22 +7,28 @@ require 'optparse'
 require 'pathname'
 require 'socket'
 require 'time'
+require 'uri'
 
 op = OptionParser.new do |opts|
   opts.banner =
     "Usage: proxxxy [options]\n" \
     'https proxy'
 
+  opts.accept(URI) do |val|
+    uri = URI.parse(val)
+  rescue URI::Error
+    raise OptionParser::InvalidArgument, val
+  else
+    next uri if uri.scheme == 'tcp' && (0..65535).cover?(uri.port)
+    next uri if uri.scheme == 'unix'
+    raise OptionParser::InvalidArgument, val
+  end
+
   opts.summary_width = 20
 
   opts.separator ''
   opts.separator 'Options'
-  opts.on('-h', '--host HOST', String, 'Bind to host (default: 0.0.0.0)')
-  opts.on('-p', '--port PORT', OptionParser::DecimalInteger, 'Use port (default: 3128)') do |port|
-    raise OptionParser::InvalidArgument, port unless (0..65535).cover?(port)
-    port
-  end
-  opts.on('-s', '--socket FILE', String, 'Bind to unix domain socket')
+  opts.on('-h', '--https [URI]', URI, 'URI to bind to (default: tcp://0.0.0.0:3128)')
   opts.on('-q', '--quiet', 'Disable logging')
   opts.on('-v', '--version', 'Show version and exit') do
     version = Pathname(__dir__).join('VERSION').read
@@ -40,13 +46,8 @@ begin
 rescue OptionParser::ParseError => e
   op.abort(e)
 else
-  if opts[:socket]
-    if opts[:host] || opts[:port]
-      op.abort('host/port and socket are mutually exclusive')
-    end
-  else
-    opts[:host] ||= '0.0.0.0'
-    opts[:port] ||= 3128
+  unless opts[:https] || opts[:socks5]
+    opts[:https] = URI.parse('tcp://0.0.0.0:3128')
   end
 end
 
@@ -157,11 +158,10 @@ EventMachine.epoll
 EventMachine.run do
   trap('INT') { EventMachine.stop }
 
-  host = opts[:host] || opts[:socket]
-  port = opts[:port]
+  https = opts[:https]
 
   begin
-    EventMachine.start_server(host, port, Client) do |client|
+    EventMachine.start_server(https.host || https.path, https.port, Client) do |client|
       client.quiet = opts[:quiet]
     end
   rescue RuntimeError => e

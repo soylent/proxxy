@@ -15,31 +15,28 @@ test 'that it shows version' do
 end
 
 test 'that it shows an error if the port is in use' do
-  opts = ['--host', '127.0.0.1', '--port', '3128']
+  opts = ['--https', 'tcp://127.0.0.1:3128']
   assert_proxxxy(*opts) do
     assert_proxxxy(*opts, stderr: 'port is in use', success: false)
   end
 end
 
 test 'that it shows an error if the port is out of range' do
-  assert_proxxxy('--port', '-1', stderr: 'invalid argument', success: false)
-  assert_proxxxy('--port', '65536', stderr: 'invalid argument', success: false)
+  https = 'tcp://127.0.0.1:-1'
+  assert_proxxxy('--https', https, stderr: 'invalid argument', success: false)
+
+  https = 'tcp://127.0.0.1:65536'
+  assert_proxxxy('--https', https, stderr: 'invalid argument', success: false)
 end
 
 test 'that it shows an error if the host is invalid' do
-  assert_proxxxy('--host', 'oiujif', stderr: 'no acceptor', success: false)
+  https = 'tcp://oiujif:3128'
+  assert_proxxxy('--https', https, stderr: 'no acceptor', success: false)
 end
 
-test 'that it disallows --host and --socket' do
-  opts = ['--host', '127.0.0.1', '--socket', 'sock']
-
-  assert_proxxxy(*opts, stderr: 'mutually exclusive', success: false)
-end
-
-test 'that it disallows --port and --socket' do
-  opts = ['--port', '3128', '--socket', 'sock']
-
-  assert_proxxxy(*opts, stderr: 'mutually exclusive', success: false)
+test 'that it shows an error if the scheme is unknown' do
+  https = 'xyz://127.0.0.1:3128'
+  assert_proxxxy('--https', https, stderr: 'invalid argument', success: false)
 end
 
 echo = start_echo_server(port: 3000)
@@ -80,7 +77,7 @@ begin
   end
 
   test 'that it can listen on tcp port' do
-    opts = ['--host', '127.0.0.1', '--port', '3128']
+    opts = ['--https', 'tcp://127.0.0.1:3128']
     assert_proxxxy(*opts, stdout: /success/) do |socket|
       socket.write("CONNECT 127.0.0.1:3000 HTTP/1.1\r\n\r\n")
 
@@ -130,7 +127,7 @@ begin
 
   test 'that it can be chained' do
     assert_proxxxy(stdout: /success/) do |socket|
-      assert_proxxxy('--port', '3128', stdout: /success/) do
+      assert_proxxxy('--https', 'tcp://127.0.0.1:3128', stdout: /success/) do
         socket.write("CONNECT 127.0.0.1:3128 HTTP/1.1\r\n\r\n")
         socket.readpartial(64)
         socket.write("CONNECT 127.0.0.1:3000 HTTP/1.1\r\n\r\n")
@@ -180,6 +177,16 @@ begin
       assert socket.read.empty?
     end
   end
+
+#   test 'that is can relay data via socks5' do
+#     assert_proxxxy(stdout: /success/) do |socket|
+#       socket.write("\x05\x01\x00")
+#       assert_equal "\x05\x00", socket.readpartial(2)
+# 
+#       socket.write("\x05\x01\x00\x01\x7F\x00\x00\x01\x30\xB8")
+#       assert_equal "\x05\x00\x00\x01", socket.readpartial(10)
+#     end
+#   end
 ensure
   echo.kill
 end
