@@ -2,30 +2,29 @@
 
 require 'benchmark'
 require 'socket'
-require_relative 'test/helper'
+require_relative 'test/server'
 
-echo = start_echo_server(port: 3000)
-pid = Process.spawn('./proxxxy', '--quiet')
-begin
-  10.times do
-    time = Benchmark.measure do
-      1000.times do
-        TCPSocket.open('127.0.0.1', 3128) do |socket|
-          socket.write("CONNECT 127.0.0.1:3000 HTTP/1.1\r\n\r\n")
-          socket.gets
-          socket.gets
-          socket.write("proxxxy\r\n")
-          socket.gets
+Server.start_echo_server(port: 3000) do
+  pid = Process.spawn('./bin/proxxxy', '--quiet')
+  begin
+    10.times do
+      time = Benchmark.measure do
+        1000.times do
+          TCPSocket.open('127.0.0.1', 3128) do |socket|
+            socket.write("CONNECT 127.0.0.1:3000 HTTP/1.1\r\n\r\n")
+            socket.readpartial(64)
+            socket.write("proxxxy\r\n")
+            socket.readpartial(64)
+          end
         end
       end
+      puts(time)
     end
-    puts(time)
+  rescue Errno::ECONNREFUSED
+    sleep 0.01
+    retry
+  ensure
+    Process.kill('INT', pid)
+    Process.waitall
   end
-rescue Errno::ECONNREFUSED
-  sleep 0.01
-  retry
-ensure
-  echo.kill
-  Process.kill('INT', pid)
-  Process.waitall
 end

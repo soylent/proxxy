@@ -1,0 +1,121 @@
+#!/usr/bin/env -S ruby -w
+# frozen_string_literal: true
+
+require 'eventmachine'
+require 'optparse'
+require 'pathname'
+require 'uri'
+
+urls = []
+opts = {}
+
+op = OptionParser.new do |op|
+  op.accept(Timeout) do |val|
+    timeout = Float(val)
+  rescue ArgumentError
+    raise OptionParser::InvalidArgument, val
+  else
+    raise OptionParser::InvalidArgument, val if timeout.negative?
+    timeout
+  end
+
+  op.summary_width = 32
+
+  op.banner =
+    "Usage: proxxxy [URL...] [options]\n" \
+    'https and socks5 proxy'
+
+  op.separator ''
+  op.separator 'URL (default: https://0.0.0.0:3128)'
+  op.separator '    Format: proxy_type://address:port or proxy_type://path'
+  op.separator '    Examples:'
+  op.separator '      HTTPS proxy on port 3128, IPv4'
+  op.separator '      https://0.0.0.0:3128'
+  op.separator ''
+  op.separator '      HTTPS proxy on /tmp/proxxxy'
+  op.separator '      https:///tmp/proxxxy'
+  op.separator ''
+  op.separator '      SOCKS5 proxy on port 1080, IPv6 and IPv4'
+  op.separator '      socks5://[::]:1080'
+
+  op.on(//) do |val|
+    url = URI.parse(val)
+  rescue URI::Error
+    raise OptionParser::InvalidArgument, val
+  else
+    urls << url
+    if url.scheme == 'https' || url.scheme == 'socks5'
+      url.host&.tr!('[]', '')
+      next if url.host && (0..65535).cover?(url.port)
+      url.port = nil
+      next if !url.path.empty?
+    end
+    raise OptionParser::InvalidArgument, val
+  end
+
+  op.separator ''
+  op.separator 'Options'
+
+  op.on('-t', '--connect-timeout TIMEOUT', Timeout, 'Connect timeout in seconds (default: 20.0)') do |timeout|
+    opts[:connect_timeout] = timeout
+  end
+
+  op.on('-q', '--quiet', 'Disable logging') do |quiet|
+    opts[:quiet] = quiet
+  end
+
+  op.on('-v', '--version', 'Show version and exit') do
+    version = Pathname(__dir__).parent.join('VERSION').read
+    puts(version)
+    exit
+  end
+
+  op.on_tail('-h', '--help', 'Print this help') do
+    puts(op)
+    exit
+  end
+end
+
+begin
+  op.parse!
+rescue OptionParser::ParseError => e
+  op.abort(e)
+else
+  opts[:connect_timeout] ||= 20
+  urls << URI.parse('https://0.0.0.0:3128') if urls.empty?
+end
+
+$LOAD_PATH.unshift Pathname(__dir__).parent.join('lib')
+
+require 'https'
+require 'socks5'
+
+EventMachine.epoll
+EventMachine.run do
+  trap('INT') do
+    begin
+      EventMachine.stop
+    rescue RuntimeError => e
+      raise e.cause
+    end
+  end
+
+  urls.each do |url|
+    case url.scheme
+    when 'https'
+      handler = HTTPS
+    when 'socks5'
+      handler = SOCKS5
+    else
+      raise url.scheme
+    end
+    begin
+      EventMachine.start_server(url.host || url.path, url.port, handler, opts)
+    rescue RuntimeError => e
+      EventMachine.stop
+      op.abort(e)
+    end
+  end
+end
+
+# vim: ft=ruby

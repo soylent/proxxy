@@ -5,78 +5,60 @@ require 'socket'
 require 'tmpdir'
 require 'uri'
 
-def start_echo_server(host: '127.0.0.1', port: 3000)
-  queue = Queue.new
-  Thread.new do
-    TCPServer.open(host, port) do |server|
-      queue.push(Thread.current)
-      loop do
-        socket = server.accept
-        IO.copy_stream(socket, socket)
-      ensure
-        socket&.close
-      end
-    end
-  end
-  queue.pop
-end
-
-def start_dead_server(host: '127.0.0.1', port: 3001)
-  TCPServer.open(host, port) do |server|
-    server.listen(0)
-    Socket.tcp('127.0.0.1', port) { yield }
-  end
-end
-
-def assert_proxxxy(*opts, stdout: nil, stderr: nil, success: true, &blk)
-  opts.unshift('./proxxxy')
-
+def assert_proxxxy(*opts, stdout: nil, stderr: nil, success: true, &block)
   if block_given?
-    https_idx = opts.index('--https') || opts.index('-h')
-    if https_idx
-      https = opts.fetch(https_idx.succ)
-    else
+    url = opts.find { |opt| !opt.start_with?('-') }
+    unless url
       path = File.join(Dir.tmpdir, 'proxxxy')
-      https = "unix://#{path}"
-      opts.push('--https', https)
+      url = "https://#{path}"
+      opts.push(url)
     end
-
-    https = URI.parse(https)
-
-    p_stdin, p_stdout, p_stderr, p_thr = Open3.popen3(*opts)
-
-    begin
-      case https.scheme
-      when 'tcp'
-        Socket.tcp('127.0.0.1', https.port, &blk)
-      when 'unix'
-        Socket.unix(https.path, &blk)
-      end
-    rescue Errno::ENOENT, Errno::ECONNREFUSED
-      sleep 0.01
-      retry
-    ensure
-      Process.kill('INT', p_thr[:pid])
-
-      p_stdin.close
-
-      out = p_stdout.read
-      p_stdout.close
-
-      err = p_stderr.read
-      p_stderr.close
-
-      status = p_thr.value
-    end
-  else
-    out, err, status = Open3.capture3(*opts)
+    url = URI.parse(url)
   end
+  Open3.popen3('bin/proxxxy', *opts) do |_p_stdin, p_stdout, p_stderr, p_thr|
+    if block_given?
+      retries = 0
+      block_success = false
+      begin
+        if url.host && url.port
+          Socket.tcp(url.host.tr('[]', ''), url.port, &block)
+        elsif !url.path.empty?
+          Socket.unix(url.path, &block)
+        else
+          raise ArgumentError, url
+        end
+      rescue Errno::ENOENT, Errno::ECONNREFUSED
+        raise if retries > 20
+        sleep(0.05)
+        retries += 1
+        retry
+      else
+        block_success = true
+      ensure
+        Process.kill('INT', p_thr[:pid]) rescue Errno::ESRCH
 
-  stderr_ok = stderr ? err.match?(stderr) : err.empty?
-  assert stderr_ok, "stderr: #{err}"
+        unless block_success
+          puts "\n\n"
+          puts "  status: #{p_thr.value}"
+          puts "  stdout: #{p_stdout.read}"
+          puts "  stderr: #{p_stderr.read}"
+        end
+      end
+    end
 
-  stdout_ok = stdout ? out.match?(stdout) : out.empty?
-  assert stdout_ok, "stdout: #{out}"
+    Process.kill('INT', p_thr[:pid]) unless p_thr.join(1)
 
-  assert_equal success, status.success?
+    err = p_stderr.read
+    assert stderr ? err.match?(stderr) : err.empty?, "stderr: #{err}"
+
+    out = p_stdout.read
+    assert stdout ? out.match?(stdout) : out.empty?, "stdout: #{out}"
+
+    status = p_thr.value
+    assert_equal success, status.success?
+  end
+end
+
+def test_p(name, params)
+  params.each { |param| test(name % param) { yield param } }
 end
