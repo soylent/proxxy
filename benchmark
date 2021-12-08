@@ -5,7 +5,7 @@ require 'socket'
 require_relative 'test/server'
 
 Server.start_echo_server(port: 3000) do
-  pid = Process.spawn('./bin/proxxxy', '--quiet')
+  pid = Process.spawn('./bin/proxxy', '--quiet')
   begin
     10.times do
       time = Benchmark.measure do
@@ -13,7 +13,7 @@ Server.start_echo_server(port: 3000) do
           TCPSocket.open('127.0.0.1', 3128) do |socket|
             socket.write("CONNECT 127.0.0.1:3000 HTTP/1.1\r\n\r\n")
             socket.readpartial(64)
-            socket.write("proxxxy\r\n")
+            socket.write("proxxy\r\n")
             socket.readpartial(64)
           end
         end

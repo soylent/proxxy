@@ -22,7 +22,7 @@ op = OptionParser.new do |op|
   op.summary_width = 32
 
   op.banner =
-    "Usage: proxxxy [URL...] [options]\n" \
+    "Usage: proxxy [URL...] [options]\n" \
     'https and socks5 proxy'
 
   op.separator ''
@@ -32,8 +32,8 @@ op = OptionParser.new do |op|
   op.separator '      HTTPS proxy on port 3128, IPv4'
   op.separator '      https://0.0.0.0:3128'
   op.separator ''
-  op.separator '      HTTPS proxy on /tmp/proxxxy'
-  op.separator '      https:///tmp/proxxxy'
+  op.separator '      HTTPS proxy on /tmp/proxxy'
+  op.separator '      https:///tmp/proxxy'
   op.separator ''
   op.separator '      SOCKS5 proxy on port 1080, IPv6 and IPv4'
   op.separator '      socks5://[::]:1080'

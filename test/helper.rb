@@ -5,17 +5,17 @@ require 'socket'
 require 'tmpdir'
 require 'uri'
 
-def assert_proxxxy(*opts, stdout: nil, stderr: nil, success: true, &block)
+def assert_proxxy(*opts, stdout: nil, stderr: nil, success: true, &block)
   if block_given?
     url = opts.find { |opt| !opt.start_with?('-') }
     unless url
-      path = File.join(Dir.tmpdir, 'proxxxy')
+      path = File.join(Dir.tmpdir, 'proxxy')
       url = "https://#{path}"
       opts.push(url)
     end
     url = URI.parse(url)
   end
-  Open3.popen3('bin/proxxxy', *opts) do |_p_stdin, p_stdout, p_stderr, p_thr|
+  Open3.popen3('bin/proxxy', *opts) do |_p_stdin, p_stdout, p_stderr, p_thr|
     if block_given?
       retries = 0
       block_success = false

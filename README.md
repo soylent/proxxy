@@ -1,16 +1,16 @@
-# proxxxy
+# proxxy
 
 HTTPS & SOCKS5 Proxy
 
 ## Installation
 
-    gem install proxxxy
+    gem install proxxy
 
 ## Usage
 
-By default, proxxxy starts an HTTPS proxy server on port 3128.
+By default, proxxy starts an HTTPS proxy server on port 3128.
 
-    proxxxy
+    proxxy
 
 Send a request through the proxy server. Note the `-p` (proxy tunnel) flag.
 
@@ -18,11 +18,11 @@ Send a request through the proxy server. Note the `-p` (proxy tunnel) flag.
 
 You can start several proxy servers.
 
-    proxxxy https://0.0.0.0:3128 socks5://127.0.0.1:1080
+    proxxy https://0.0.0.0:3128 socks5://127.0.0.1:1080
 
 For more details please run:
 
-    proxxxy --help
+    proxxy --help
 
 ## Logging
 
@@ -59,7 +59,7 @@ Pull requests are welcome!
 
 To run tests, install `cutest` and execute:
 
-    cutest test/proxxxy.rb
+    cutest test/proxxy.rb
 
 To run benchmark:
 
